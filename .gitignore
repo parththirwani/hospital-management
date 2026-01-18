@@ -1,0 +1,35 @@
+# Python & virtual env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+env/
+.venv/
+*.env
+.env.*
+
+# Data & local files
+patients.json
+*.json         
+*.csv
+*.db
+*.sqlite*
+
+# Testing & linting cache
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
+
+# Lockfile – keep only one
+# poetry.lock
+# uv.lock
+# pdm.lock

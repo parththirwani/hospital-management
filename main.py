@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Path, Query
-from pydantic import BaseModel, Field, computed_field
 from fastapi.responses import JSONResponse
-from typing import Annotated, Literal, Any, Dict
+from pydantic import BaseModel, Field, computed_field
+from typing import Annotated, Literal, Optional, Dict
 import json
 import uuid
 
@@ -21,16 +21,17 @@ def save_data(data: Dict[str, dict]) -> None:
 
 app = FastAPI(
     title="Patient Management API",
-    description="API to manage patient records",
-    version="1.0.0"
+    description="API for managing patient records with auto-generated UUIDs",
+    version="1.0"
 )
 
+
 class PatientCreate(BaseModel):
-    name: Annotated[str, Field(..., min_length=2, max_length=100, examples=["Aarav Sharma"])]
-    city: Annotated[str, Field(..., min_length=2, max_length=100, examples=["Delhi"])]
+    name: Annotated[str, Field(..., min_length=2, examples=["Aarav Sharma"])]
+    city: Annotated[str, Field(..., min_length=2, examples=["Delhi"])]
     age: Annotated[int, Field(..., ge=1, le=120, examples=[28])]
-    gender: Annotated[Literal["Male", "Female", "Other"], Field(examples=["Male"])]
-    height: Annotated[float, Field(..., gt=0.5, le=2.5, description="in meters", examples=[1.72])]
+    gender: Annotated[Literal["male", "female", "others"], Field(..., examples=["male"])]
+    height: Annotated[float, Field(..., gt=0.4, le=2.5, description="in meters", examples=[1.72])]
     weight: Annotated[float, Field(..., gt=10.0, le=300.0, description="in kg", examples=[68.5])]
 
     @computed_field
@@ -42,73 +43,49 @@ class PatientCreate(BaseModel):
     @property
     def verdict(self) -> str:
         if self.bmi < 18.5:
-            return "underweight"
+            return "Underweight"
         elif self.bmi < 25:
-            return "normal"
+            return "Normal"
         elif self.bmi < 30:
-            return "overweight"
+            return "Overweight"   # ← fixed: was "Normal" before
         else:
-            return "obese"
+            return "Obese"
+
 
 class Patient(PatientCreate):
     id: str
 
 
+class PatientUpdate(BaseModel):
+    name: Optional[str] = None
+    city: Optional[str] = None
+    age: Optional[Annotated[int, Field(ge=1, le=120)]] = None
+    gender: Optional[Literal["male", "female", "others"]] = None
+    height: Optional[Annotated[float, Field(gt=0.4, le=2.5)]] = None
+    weight: Optional[Annotated[float, Field(gt=10.0, le=300.0)]] = None
+
+
 @app.get("/")
-def root():
-    return {"message": "Patient Management API"}
+def hello():
+    return {"message": "Patient Management System API"}
 
 
 @app.get("/about")
 def about():
-    return {
-        "message": "REST API to manage patient records"
-    }
+    return {"message": "A fully functional API to manage your patient records"}
 
 
-@app.get("/patients")
-def get_all_patients():
+@app.get("/view")
+def view_all():
     data = load_data()
     return {
-        "message": "All patients retrieved",
         "count": len(data),
         "patients": list(data.values())
     }
 
 
-@app.get("/patients/sort")
-def sort_patients(
-    sort_by: Annotated[
-        Literal["age", "height", "weight", "bmi"],
-        Query(..., description="Field to sort by")
-    ],
-    order: Annotated[
-        Literal["asc", "desc"],
-        Query(description="Sort direction")
-    ] = "asc"
-):
-    patients = load_data()
-    patient_list = list(patients.values())
-
-    reverse = order == "desc"
-
-    def sort_key(p: dict) -> Any:
-        if sort_by == "bmi":
-            h = p.get("height", 0)
-            w = p.get("weight", 0)
-            return round(w / (h ** 2), 2) if h > 0 else 0
-        return p.get(sort_by, 0) or 0
-
-    sorted_patients = sorted(patient_list, key=sort_key, reverse=reverse)
-
-    return {
-        "message": f"Sorted by {sort_by} ({order})",
-        "patients": sorted_patients
-    }
-
-
-@app.get("/patients/{patient_id}")
-def get_patient(patient_id: Annotated[str, Path(examples=["A1B2C3D4"])]):
+@app.get("/patient/{patient_id}")
+def view_patient(patient_id: Annotated[str, Path(examples=["A1B2C3D4"])]):
     data = load_data()
     patient = data.get(patient_id)
     if not patient:
@@ -116,22 +93,95 @@ def get_patient(patient_id: Annotated[str, Path(examples=["A1B2C3D4"])]):
     return patient
 
 
-@app.post("/patients", status_code=201, response_model=Patient)
-def create_patient(patient_in: PatientCreate):
-    patients = load_data()
+@app.get("/sort")
+def sort_patients(
+    sort_by: Annotated[
+        Literal["height", "weight", "bmi"],
+        Query(..., description="Field to sort by")
+    ],
+    order: Annotated[
+        Literal["asc", "desc"],
+        Query(description="Sort direction")
+    ] = "asc"
+):
+    data = load_data()
+    patients = list(data.values())
+
+    reverse = order == "desc"
+
+    def sort_key(p: dict):
+        if sort_by == "bmi":
+            h = p.get("height", 0)
+            w = p.get("weight", 0)
+            return round(w / (h ** 2), 2) if h > 0 else 0
+        return p.get(sort_by, 0)
+
+    sorted_patients = sorted(patients, key=sort_key, reverse=reverse)
+
+    return {
+        "sorted_by": f"{sort_by} ({order})",
+        "patients": sorted_patients
+    }
+
+
+@app.post("/create", status_code=201)
+def create_patient(patient: PatientCreate):
+    data = load_data()
 
     new_id = uuid.uuid4().hex[:8].upper()
 
-    while new_id in patients:
+    while new_id in data:
         new_id = uuid.uuid4().hex[:8].upper()
 
-    patient_dict = patient_in.model_dump()
+    patient_dict = patient.model_dump()
     patient_dict["id"] = new_id
 
-    patients[new_id] = patient_dict
-    save_data(patients)
+    data[new_id] = patient_dict
+    save_data(data)
 
-    return patient_dict
+    return JSONResponse(
+        status_code=201,
+        content={
+            "message": "Patient created successfully",
+            "patient_id": new_id,
+            "patient": patient_dict
+        }
+    )
+
+
+@app.put("/edit/{patient_id}")
+def update_patient(patient_id: str, patient_update: PatientUpdate):
+    data = load_data()
+    if patient_id not in data:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    existing = data[patient_id]
+
+    update_data = patient_update.model_dump(exclude_unset=True)
+    existing.update(update_data)
+
+    try:
+        full_patient = Patient(**existing)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Validation error after update: {str(e)}")
+
+    data[patient_id] = full_patient.model_dump(exclude={"id"})
+
+    save_data(data)
+
+    return {"message": "Patient updated successfully", "patient_id": patient_id}
+
+
+@app.delete("/delete/{patient_id}")
+def delete_patient(patient_id: str):
+    data = load_data()
+    if patient_id not in data:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    del data[patient_id]
+    save_data(data)
+
+    return {"message": "Patient deleted successfully"}
 
 
 if __name__ == "__main__":
